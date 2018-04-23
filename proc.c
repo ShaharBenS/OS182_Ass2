@@ -8,13 +8,15 @@
 #include "spinlock.h"
 
 struct {
-    struct spinlock lock;
+    //struct spinlock lock;
     struct proc proc[NPROC];
 } ptable;
 
 static struct proc *initproc;
 
 int nextpid = 1;
+enum procstate userinit_old;
+enum procstate fork_old;
 
 extern void forkret(void);
 
@@ -22,9 +24,13 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
+
+
+
+
 void
 pinit(void) {
-    initlock(&ptable.lock, "ptable");
+    //initlock(&ptable.lock, "ptable");
 }
 
 // Must be called with interrupts disabled
@@ -68,12 +74,14 @@ myproc(void) {
 
 int
 allocpid(void) {
+    /* 3.1.1 */
+
     int pid;
-    do
-    {
+    pushcli();
+    do {
         pid = nextpid;
-    }
-    while(!cas(&nextpid,pid,pid+1));
+    } while (!cas(&nextpid, pid, pid + 1));
+    popcli();
     return pid;
 }
 
@@ -88,18 +96,23 @@ allocproc(void) {
     struct proc *p;
     char *sp;
 
-    acquire(&ptable.lock);
+    /* 3.2 */
 
-    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-        if (p->state == UNUSED)
-            goto found;
+    //acquire(&ptable.lock);
 
-    release(&ptable.lock);
-    return 0;
+    pushcli();
+    do {
+        for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+            if (p->state == UNUSED)
+                break;
 
-    found:
-    p->state = EMBRYO;
-    release(&ptable.lock);
+        if (p == &ptable.proc[NPROC]) {
+            return 0;
+        }
+        //release(&ptable.lock);
+    } while (!cas(&p->state, UNUSED, EMBRYO));
+
+    popcli();
     p->pid = allocpid();
 
 
@@ -165,13 +178,12 @@ userinit(void) {
     // run this process. the acquire forces the above
     // writes to be visible, and the lock is also needed
     // because the assignment might not be atomic.
-    acquire(&ptable.lock);
-
-    p->state = RUNNABLE;
-
-    release(&ptable.lock);
-}
-
+    pushcli();
+    do{
+        userinit_old = p->state;
+    }
+    while(!cas(&p->state,userinit_old, RUNNABLE));
+    popcli();
 // Grow current process's memory by n bytes.
 // Return 0 on success, -1 on failure.
 int
@@ -237,11 +249,12 @@ fork(void) {
 
     pid = np->pid;
 
-    acquire(&ptable.lock);
-
-    np->state = RUNNABLE;
-
-    release(&ptable.lock);
+    pushcli();
+    do{
+        fork_old = np->state;
+    }
+    while(!cas(&np->state,fork_old, RUNNABLE));
+    popcli();
 
     return pid;
 }
@@ -579,7 +592,7 @@ int SIG_KILL_HANDLER(int pid) {
     for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if (p->pid == pid) {
             p->killed = 1;
-            p->pending_signals = (uint) ((SIGKILL^0xFFFFFFFF) | p->pending_signals);
+            p->pending_signals = (uint) ((SIGKILL ^ 0xFFFFFFFF) | p->pending_signals);
             // Wake process from sleep if necessary.
             if (p->state == SLEEPING)
                 p->state = RUNNABLE;
@@ -591,17 +604,16 @@ int SIG_KILL_HANDLER(int pid) {
     return -1;
 }
 
-int SIG_STOP_HANDLER(){
+int SIG_STOP_HANDLER() {
     struct proc *p = myproc();
-    while((p->pending_signals & (0x80000000 >> SIGCONT)) == 0 | (p->pending_signals & (0x80000000 >> SIGSTOP)) > 0)
-    {
+    while ((p->pending_signals & (0x80000000 >> SIGCONT)) == 0 | (p->pending_signals & (0x80000000 >> SIGSTOP)) > 0) {
         yield();
     }
 
 }
 
-int SIG_CONT_HANDLER(){
+int SIG_CONT_HANDLER() {
     struct proc *p = myproc();
-    p->pending_signals = (uint) (((SIGCONT^0xFFFFFFFF) & (SIGSTOP^0xFFFFFFFF)) | p->pending_signals);
+    p->pending_signals = (uint) (((SIGCONT ^ 0xFFFFFFFF) & (SIGSTOP ^ 0xFFFFFFFF)) | p->pending_signals);
 
 }

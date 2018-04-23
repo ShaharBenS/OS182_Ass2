@@ -41,7 +41,8 @@ struct context {
 };
 
 enum procstate {
-    UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE
+    UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE,
+    _UNUSED, _EMBRYO, _SLEEPING, _RUNNABLE, _RUNNING, _ZOMBIE,
 };
 
 // Per-process state
